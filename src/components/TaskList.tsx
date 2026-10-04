@@ -12,9 +12,10 @@ interface TaskListProps {
   onSearchChange: (query: string) => void;
   sortAsc: boolean;
   onToggleSort: () => void;
-  onToggleTask: (id: string) => void;
+  onToggleTask: (id: string) => Promise<boolean>;
   onDeleteTask: (id: string) => void;
-  onUpdateTitle: (id: string, newTitle: string) => void;
+  onUpdateTitle: (id: string, newTitle: string) => Promise<boolean>;
+  processingTaskId: string | null;
   totalCount: number;
   pendingCount: number;
   completedCount: number;
@@ -31,6 +32,7 @@ export default function TaskList({
   onToggleTask,
   onDeleteTask,
   onUpdateTitle,
+  processingTaskId,
   totalCount,
   pendingCount,
   completedCount,
@@ -108,6 +110,7 @@ export default function TaskList({
               onToggle={onToggleTask}
               onDelete={onDeleteTask}
               onUpdateTitle={onUpdateTitle}
+              isProcessing={processingTaskId === task.id}
             />
           ))
         ) : (

@@ -4,7 +4,8 @@ import { useState } from "react";
 import Icon from "./Icon";
 
 interface TaskFormProps {
-  onAddTask: (title: string, subject: string) => void;
+  onAddTask: (title: string, subject: string) => Promise<boolean>;
+  isSubmitting?: boolean;
 }
 
 const QUICK_SUBJECTS = [
@@ -17,12 +18,12 @@ const QUICK_SUBJECTS = [
   },
 ];
 
-export default function TaskForm({ onAddTask }: TaskFormProps) {
+export default function TaskForm({ onAddTask, isSubmitting = false }: TaskFormProps) {
   const [title, setTitle] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("Đại cương");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = title.trim();
 
@@ -37,9 +38,11 @@ export default function TaskForm({ onAddTask }: TaskFormProps) {
       return;
     }
 
-    onAddTask(trimmed, selectedSubject);
-    setErrorMessage(null);
-    setTitle("");
+    const succeeded = await onAddTask(trimmed, selectedSubject);
+    if (succeeded) {
+      setErrorMessage(null);
+      setTitle("");
+    }
   };
 
   return (
@@ -83,10 +86,11 @@ export default function TaskForm({ onAddTask }: TaskFormProps) {
           </div>
           <button
             type="submit"
+            disabled={isSubmitting}
             className="h-11 px-6 rounded-lg bg-primary-container text-on-primary font-label-lg text-label-lg flex items-center justify-center gap-2 shadow-sm hover:opacity-95 active:scale-[0.99] transition-all shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <Icon name="add" className="text-[1.25rem]" />
-            <span>Thêm công việc</span>
+            <span>{isSubmitting ? "Đang thêm..." : "Thêm công việc"}</span>
           </button>
         </div>
         {errorMessage && (

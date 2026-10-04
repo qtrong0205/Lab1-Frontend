@@ -8,7 +8,8 @@ interface TaskItemProps {
   task: Task;
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
-  onUpdateTitle: (id: string, newTitle: string) => void;
+  onUpdateTitle: (id: string, newTitle: string) => Promise<boolean>;
+  isProcessing?: boolean;
 }
 
 function getSubjectBadgeClasses(subject?: string) {
@@ -35,6 +36,7 @@ export default function TaskItem({
   onToggle,
   onDelete,
   onUpdateTitle,
+  isProcessing = false,
 }: TaskItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(task.title);
@@ -46,7 +48,7 @@ export default function TaskItem({
     setIsEditing(false);
   };
 
-  const saveEdit = (event: React.FormEvent<HTMLFormElement>) => {
+  const saveEdit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedTitle = editTitle.trim();
 
@@ -61,9 +63,11 @@ export default function TaskItem({
       return;
     }
 
-    onUpdateTitle(task.id, trimmedTitle);
-    setEditError(null);
-    setIsEditing(false);
+    const succeeded = await onUpdateTitle(task.id, trimmedTitle);
+    if (succeeded) {
+      setEditError(null);
+      setIsEditing(false);
+    }
   };
 
   return (
@@ -107,6 +111,7 @@ export default function TaskItem({
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="submit"
+                disabled={isProcessing}
                 className="h-10 px-3.5 rounded-lg bg-primary-container text-on-primary font-label-md text-label-md flex items-center gap-1.5 hover:bg-primary transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <Icon name="check" className="text-[1.125rem]" />
@@ -115,6 +120,7 @@ export default function TaskItem({
               <button
                 type="button"
                 onClick={cancelEdit}
+                disabled={isProcessing}
                 className="h-10 px-3.5 rounded-lg bg-surface-container-high text-on-surface-variant hover:text-on-surface font-label-md text-label-md flex items-center gap-1.5 hover:bg-surface-container-highest transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <Icon name="close" className="text-[1.125rem]" />
@@ -139,6 +145,7 @@ export default function TaskItem({
             <button
               type="button"
               onClick={() => onToggle(task.id)}
+              disabled={isProcessing}
               aria-label={
                 task.is_done
                   ? `Đánh dấu "${task.title}" là chưa xong`
@@ -205,6 +212,7 @@ export default function TaskItem({
                 setEditError(null);
                 setIsEditing(true);
               }}
+              disabled={isProcessing}
               aria-label={`Chỉnh sửa công việc "${task.title}"`}
               title="Chỉnh sửa tên công việc"
               className="w-8 h-8 rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-high flex items-center justify-center transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -214,6 +222,7 @@ export default function TaskItem({
             <button
               type="button"
               onClick={() => onDelete(task.id)}
+              disabled={isProcessing}
               aria-label={`Xóa công việc "${task.title}"`}
               title="Xóa công việc (có xác nhận)"
               className="w-8 h-8 rounded-lg text-on-surface-variant hover:text-error hover:bg-error-container flex items-center justify-center transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"

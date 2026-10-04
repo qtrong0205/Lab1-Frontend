@@ -1,58 +1,36 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { Session } from "@supabase/supabase-js";
 import type { Task, TaskFilter } from "@/types/task";
 import TaskForm from "./TaskForm";
 import TaskList from "./TaskList";
 import Icon from "./Icon";
+import { createClient } from "@/lib/supabase-browser";
 
-// Dữ liệu mẫu ban đầu có đầy đủ id, title, is_done
-const INITIAL_TASKS: Task[] = [
-  {
-    id: "1",
-    title: "Ôn tập từ vựng IELTS Reading Cam 18 Test 2",
-    is_done: false,
-    subject: "Tiếng Anh",
-    dueDate: "Hôm nay, 16:00",
-    isUrgent: true,
-  },
-  {
-    id: "2",
-    title: "Làm 5 bài tập cấu trúc dữ liệu Cây nhị phân",
-    is_done: false,
-    subject: "Tin học",
-    dueDate: "Ngày mai, 10:00",
-  },
-  {
-    id: "3",
-    title: "Đọc tài liệu Triết học Mác - Lênin chương 2",
-    is_done: false,
-    subject: "Đại cương",
-    dueDate: "Thứ Sáu",
-  },
-  {
-    id: "4",
-    title: "Nộp báo cáo đồ án môn Thiết kế giao diện",
-    is_done: true,
-    subject: "Thiết kế",
-    dueDate: "Hôm nay",
-    completedAt: "Đã hoàn tất",
-  },
-  {
-    id: "5",
-    title: "Luyện phát âm ngữ điệu 20 phút",
-    is_done: true,
-    subject: "Tiếng Anh",
-    dueDate: "Hôm nay",
-    completedAt: "Đã hoàn tất",
-  },
-];
+class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+  }
+}
 
 export default function TaskDashboard() {
+  const router = useRouter();
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   // Quản lý danh sách công việc bằng React State thuần túy (không lưu localStorage, không gọi API)
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isLoadingTasks, setIsLoadingTasks] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [processingTaskId, setProcessingTaskId] = useState<string | null>(null);
+  const [isAddingTask, setIsAddingTask] = useState(false);
   const [filter, setFilter] = useState<TaskFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortAsc, setSortAsc] = useState(false);
@@ -63,6 +41,103 @@ export default function TaskDashboard() {
   // Pomodoro timer state
   const [pomodoroRunning, setPomodoroRunning] = useState(false);
   const [pomodoroSeconds, setPomodoroSeconds] = useState(25 * 60);
+
+  const apiFetch = useCallback(async <T,>(
+    path: string,
+    options: RequestInit = {}
+  ): Promise<T> => {
+    const {
+      data: { session: currentSession },
+    } = await createClient().auth.getSession();
+
+    if (!currentSession) {
+      router.replace("/login");
+      throw new ApiError("Phiên đăng nhập đã hết hạn.", 401);
+    }
+
+    const headers = new Headers(options.headers);
+    headers.set("Authorization", `Bearer ${currentSession.access_token}`);
+    if (options.body !== undefined) {
+      headers.set("Content-Type", "application/json");
+    }
+
+    const response = await fetch(path, {
+      ...options,
+      headers,
+      credentials: "same-origin",
+    });
+    let payload: { data?: T; error?: string } = {};
+    try {
+      payload = await response.json();
+    } catch {
+      if (!response.ok) {
+        throw new ApiError("Máy chủ trả về phản hồi không hợp lệ.", response.status);
+      }
+    }
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        router.replace("/login");
+        throw new ApiError("Phiên đăng nhập đã hết hạn.", 401);
+      }
+      throw new ApiError(
+        payload.error || "Không thể thực hiện yêu cầu.",
+        response.status
+      );
+    }
+
+    return payload.data as T;
+  }, [router]);
+
+  const loadTasks = useCallback(async () => {
+    setIsLoadingTasks(true);
+    setErrorMessage(null);
+    try {
+      const data = await apiFetch<Task[]>("/api/tasks");
+      setTasks(data ?? []);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return;
+      setErrorMessage(
+        error instanceof ApiError ? error.message : "Không tải được công việc."
+      );
+    } finally {
+      setIsLoadingTasks(false);
+    }
+  }, [apiFetch]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadSession = async () => {
+      const {
+        data: { session: currentSession },
+      } = await createClient().auth.getSession();
+
+      if (!mounted) return;
+      setSession(currentSession);
+      setAuthReady(true);
+      if (!currentSession) router.replace("/login");
+      if (currentSession) void loadTasks();
+    };
+
+    void loadSession();
+
+    const {
+      data: { subscription },
+    } = createClient().auth.onAuthStateChange((_event, currentSession) => {
+      if (!mounted) return;
+      setSession(currentSession);
+      if (!currentSession) {
+        setTasks([]);
+        router.replace("/login");
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [loadTasks, router]);
 
   // Hiệu ứng đếm ngược Pomodoro
   useEffect(() => {
@@ -91,40 +166,76 @@ export default function TaskDashboard() {
 
   // Thêm công việc mới
   // 1. Chức năng Thêm tên công việc mới
-  const handleAddTask = (title: string, subject: string) => {
-    const newTask: Task = {
-      id: Date.now().toString(),
-      title,
-      is_done: false,
-      subject,
-      dueDate: "Hôm nay",
-    };
-    setTasks((prev) => [newTask, ...prev]);
+  const handleAddTask = async (title: string, _subject: string): Promise<boolean> => {
+    void _subject;
+    setIsAddingTask(true);
+    setErrorMessage(null);
+    try {
+      await apiFetch<Task>("/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      });
+      await loadTasks();
+      return true;
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 401)) {
+        setErrorMessage(
+          error instanceof ApiError ? error.message : "Không thêm được công việc."
+        );
+      }
+      return false;
+    } finally {
+      setIsAddingTask(false);
+    }
   };
 
   // Bật/tắt trạng thái hoàn thành
   // 2. Chức năng Sửa tên công việc
-  const handleUpdateTitle = (id: string, newTitle: string) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, title: newTitle } : t))
-    );
+  const handleUpdateTitle = async (id: string, newTitle: string): Promise<boolean> => {
+    setProcessingTaskId(id);
+    setErrorMessage(null);
+    try {
+      await apiFetch<Task>(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title: newTitle }),
+      });
+      await loadTasks();
+      return true;
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 401)) {
+        setErrorMessage(
+          error instanceof ApiError ? error.message : "Không cập nhật được công việc."
+        );
+      }
+      return false;
+    } finally {
+      setProcessingTaskId(null);
+    }
   };
 
   // 3. Chức năng Đổi trạng thái hoàn thành (is_done)
-  const handleToggleTask = (id: string) => {
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id === id) {
-          const nextDone = !t.is_done;
-          return {
-            ...t,
-            is_done: nextDone,
-            completedAt: nextDone ? "Vừa xong" : undefined,
-          };
-        }
-        return t;
-      })
-    );
+  const handleToggleTask = async (id: string): Promise<boolean> => {
+    const task = tasks.find((item) => item.id === id);
+    if (!task) return false;
+    setProcessingTaskId(id);
+    setErrorMessage(null);
+    try {
+      await apiFetch<Task>(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_done: !task.is_done }),
+      });
+      await loadTasks();
+      return true;
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 401)) {
+        setErrorMessage(
+          error instanceof ApiError ? error.message : "Không cập nhật được công việc."
+        );
+      }
+      return false;
+    } finally {
+      setProcessingTaskId(null);
+    }
   };
 
   // 4. Chức năng Xóa có xác nhận
@@ -135,15 +246,41 @@ export default function TaskDashboard() {
     }
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (taskToDelete) {
-      setTasks((prev) => prev.filter((t) => t.id !== taskToDelete.id));
-      setTaskToDelete(null);
+      setProcessingTaskId(taskToDelete.id);
+      setErrorMessage(null);
+      try {
+        await apiFetch<{ id: string }>(`/api/tasks/${taskToDelete.id}`, {
+          method: "DELETE",
+        });
+        setTaskToDelete(null);
+        await loadTasks();
+      } catch (error) {
+        if (!(error instanceof ApiError && error.status === 401)) {
+          setErrorMessage(
+            error instanceof ApiError ? error.message : "Không xóa được công việc."
+          );
+        }
+      } finally {
+        setProcessingTaskId(null);
+      }
     }
   };
 
   const handleCancelDelete = () => {
     setTaskToDelete(null);
+  };
+
+  const handleSignOut = async () => {
+    const { error } = await createClient().auth.signOut();
+    if (error) {
+      setAuthError("Đăng xuất không thành công. Vui lòng thử lại.");
+      return;
+    }
+    setTasks([]);
+    setSession(null);
+    router.replace("/login");
   };
 
   // Lắng nghe phím Escape để đóng hộp thoại xác nhận xóa
@@ -215,8 +352,26 @@ export default function TaskDashboard() {
     });
   }, [tasks]);
 
+  if (!authReady || !session) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center text-on-surface-variant">
+        Đang kiểm tra phiên đăng nhập...
+      </div>
+    );
+  }
+
   return (
     <div className="bg-surface font-body-md text-body-md text-on-surface min-h-screen flex flex-col">
+      {authError && (
+        <p role="alert" className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-error px-4 py-2 text-on-error font-body-sm text-body-sm">
+          {authError}
+        </p>
+      )}
+      {errorMessage && (
+        <p role="alert" className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-error px-4 py-2 text-on-error font-body-sm text-body-sm">
+          {errorMessage}
+        </p>
+      )}
       {/* 1. Thanh điều hướng trên cùng (Fixed Header) */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
         <div className="h-16 max-w-[1140px] mx-auto px-margin-mobile md:px-margin flex items-center justify-between">
@@ -266,13 +421,14 @@ export default function TaskDashboard() {
                 Minh Anh
               </span>
             </div>
-            <Link
-              href="/login"
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
               className="flex items-center gap-space-xs px-space-md py-space-xs rounded-lg text-on-surface-variant hover:text-error hover:bg-surface-container-high transition-colors font-label-lg text-label-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Icon name="logout" className="text-[1.25rem]" />
               <span>Đăng xuất</span>
-            </Link>
+            </button>
           </div>
         </div>
       </header>
@@ -320,24 +476,31 @@ export default function TaskDashboard() {
                 </section>
 
                 {/* Khung thêm công việc mới */}
-                <TaskForm onAddTask={handleAddTask} />
+                <TaskForm onAddTask={handleAddTask} isSubmitting={isAddingTask} />
 
                 {/* Danh sách công việc với các bộ lọc */}
-                <TaskList
-                  tasks={filteredTasks}
-                  filter={filter}
-                  onFilterChange={setFilter}
-                  searchQuery={searchQuery}
-                  onSearchChange={setSearchQuery}
-                  sortAsc={sortAsc}
-                  onToggleSort={() => setSortAsc(!sortAsc)}
-                  onToggleTask={handleToggleTask}
-                  onDeleteTask={handleRequestDelete}
-                  onUpdateTitle={handleUpdateTitle}
-                  totalCount={totalCount}
-                  pendingCount={pendingCount}
-                  completedCount={completedCount}
-                />
+                {isLoadingTasks ? (
+                  <div className="rounded-xl bg-surface-container-lowest p-space-lg text-center text-on-surface-variant">
+                    Đang tải công việc...
+                  </div>
+                ) : (
+                  <TaskList
+                    tasks={filteredTasks}
+                    filter={filter}
+                    onFilterChange={setFilter}
+                    searchQuery={searchQuery}
+                    onSearchChange={setSearchQuery}
+                    sortAsc={sortAsc}
+                    onToggleSort={() => setSortAsc(!sortAsc)}
+                    onToggleTask={handleToggleTask}
+                    onDeleteTask={handleRequestDelete}
+                    onUpdateTitle={handleUpdateTitle}
+                    totalCount={totalCount}
+                    pendingCount={pendingCount}
+                    completedCount={completedCount}
+                    processingTaskId={processingTaskId}
+                  />
+                )}
               </div>
 
               {/* Cột phụ: Góc tập trung & Truyền cảm hứng (lg:col-span-4 xl:col-span-3) */}

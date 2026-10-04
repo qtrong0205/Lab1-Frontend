@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Icon from "./Icon";
+import { createClient } from "@/lib/supabase-browser";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -13,20 +13,29 @@ export default function LoginForm() {
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!email) return;
-
+    setErrorMessage(null);
     setIsLoading(true);
-    setToastMessage("Đăng nhập thành công! Đang chuyển hướng đến /tasks...");
 
-    // Mô phỏng chuyển hướng sau 1.2s (không lưu/gửi mật khẩu ra ngoài)
-    setTimeout(() => {
+    const { error } = await createClient().auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (error) {
+      setErrorMessage(
+        error.message === "Invalid login credentials"
+          ? "Email hoặc mật khẩu không đúng."
+          : "Đăng nhập không thành công. Vui lòng thử lại."
+      );
       setIsLoading(false);
-      router.push("/tasks");
-    }, 1200);
+      return;
+    }
+
+    router.replace("/tasks");
   };
 
   return (
@@ -54,7 +63,6 @@ export default function LoginForm() {
               </p>
             </div>
 
-            {/* Form mẫu */}
             <form className="space-y-4" onSubmit={handleSubmit}>
               {/* Field Email */}
               <div className="space-y-1.5">
@@ -159,20 +167,6 @@ export default function LoginForm() {
               </div>
             </form>
 
-            {/* Liên kết Xem giao diện công việc theo yêu cầu */}
-            <div className="mt-4 pt-3 border-t border-surface-container-high text-center">
-              <Link
-                href="/tasks"
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-surface-container-low hover:bg-surface-container text-primary-container hover:text-primary font-label-lg text-label-lg font-medium transition-all group"
-              >
-                <Icon
-                  name="task_alt"
-                  className="text-[18px] group-hover:translate-x-0.5 transition-transform"
-                />
-                <span>Xem giao diện công việc</span>
-              </Link>
-            </div>
-
             {/* Đăng ký */}
             <div className="mt-4 pt-3 text-center">
               <p className="font-body-sm text-body-sm text-on-surface-variant">
@@ -187,15 +181,13 @@ export default function LoginForm() {
             </div>
           </div>
 
-          {/* Toast thông báo */}
-          {toastMessage && (
-            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2.5 bg-inverse-surface text-inverse-on-surface rounded-lg font-body-sm text-body-sm shadow-xl transition-all duration-300 z-50 flex items-center gap-2">
-              <Icon
-                name="check_circle"
-                className="text-[18px] text-tertiary-fixed"
-              />
-              <span>{toastMessage}</span>
-            </div>
+          {errorMessage && (
+            <p
+              role="alert"
+              className="mt-4 text-center text-error font-body-sm text-body-sm"
+            >
+              {errorMessage}
+            </p>
           )}
         </div>
       </main>
